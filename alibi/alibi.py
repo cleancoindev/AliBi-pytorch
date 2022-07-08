@@ -118,7 +118,7 @@ class Attention(nn.Module):
         self.to_kv = nn.Linear(dim, dim_head * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
-        self.rel_pos_bias = T5RelativePositionBias(scale = dim_head ** 0.5, heads = heads)
+        self.rel_pos_bias = 
 
     def forward(self, x):
         h, device = self.heads, x.device
@@ -131,7 +131,7 @@ class Attention(nn.Module):
         sim = einsum('b h i d, b j d -> b h i j', q, k)
         i, j = sim.shape[-2:]
 
-        # T5 Relative Positional Bias
+        # T
         sim = self.rel_pos_bias(sim)
 
         # Causal Mask
@@ -164,9 +164,9 @@ class Transformer(nn.Module):
             x = ff(x)
         return x
 
-# LaMDA Model
+# ALiBi Model
 
-class LaMDA(nn.Module):
+class ALiBi(nn.Module):
     def __init__(self, *, num_tokens, dim, depth, dim_head, heads):
         super().__init__()
         self.token_emb = nn.Embedding(num_tokens, dim)
@@ -183,3 +183,6 @@ class LaMDA(nn.Module):
         x = self.transformer(x)
         logits = self.to_logits(x)
         return logits
+
+if __name__ == "__main__":
+    pass
