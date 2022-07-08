@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from einops import rearrange, repeat
+from einops import rearrange
 from torch import einsum, nn
 from math import log2, floor
 
@@ -28,22 +28,15 @@ class PreNorm(nn.Module):
     def forward(self, x, **kwargs):
         return self.fn(self.norm(x), **kwargs)
 
-# gated-GELU activation function
-
-class GEGLU(nn.Module):
-    def forward(self, x):
-        x, gates = x.chunk(2, dim = -1)
-        return x * F.gelu(gates)
-
-# feedforward layer with gated-GELU activation function
+# feedforward layer with GELU activation function
 
 class FeedForward(nn.Module):
     def __init__(self, dim, mult = 4, dropout = 0.):
         super().__init__()
         inner_dim = int(dim * mult)
         self.net = nn.Sequential(
-            nn.Linear(dim, inner_dim * 2),
-            GEGLU(),
+            nn.Linear(dim, inner_dim),
+            nn.GELU(),
             nn.Dropout(dropout), # optional dropout
             nn.Linear(inner_dim, dim)
         )
@@ -54,7 +47,7 @@ class FeedForward(nn.Module):
 # AliBi Positional Bias
 
 class AlibiPositionalBias(nn.Module):
-    def __init__(self, heads):
+    def __init__(self, heads, **kwargs):
         super().__init__()
         self.heads = heads
         slopes = torch.Tensor(self._get_slopes(heads))
@@ -114,35 +107,45 @@ class Attention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        self.to_q = nn.Linear(dim, inner_dim, bias = False)
-        self.to_kv = nn.Linear(dim, dim_head * 2, bias = False)
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
-        self.rel_pos_bias = 
+        self.alibi_pos_biases = AlibiPositionalBias(heads = self.heads)
+
+        # for caching causal mask
+
+    #     self.register_buffer("mask", None, persistent=False) 
+
+    # def get_mask(self, n, device):
+    #     if self.mask is not None and self.mask.shape[-1] >= n:
+    #         return self.mask[:n, :n]
+
+    #     mask = torch.triu(torch.ones((n, n), device=device, dtype=torch.bool), 1)
+    #     self.register_buffer("mask", mask, persistent=False)
+    #     return mask
 
     def forward(self, x):
         h, device = self.heads, x.device
 
-        q, k, v = (self.to_q(x), *self.to_kv(x).chunk(2, dim = -1))
+        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
-        q = rearrange(q, 'b n (h d) -> b h n d', h = h)
         q = q * self.scale
-
-        sim = einsum('b h i d, b j d -> b h i j', q, k)
+        sim = einsum('b h i d, b h j d -> b h i j', q, k)
         i, j = sim.shape[-2:]
 
-        # T
-        sim = self.rel_pos_bias(sim)
+        # ALiBi positional bias
+        sim = sim + self.alibi_pos_biases(sim)
 
         # Causal Mask
         causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
         sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
+        # attention
         attn = sim.softmax(dim = -1)
-
         attn = self.dropout(attn) # Optional dropout
 
-        out = einsum('b h i j, b j d -> b h i d', attn, v)
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
 
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
@@ -185,4 +188,14 @@ class ALiBi(nn.Module):
         return logits
 
 if __name__ == "__main__":
-    pass
+    alibi = ALiBi(
+        num_tokens = 20000,
+        dim = 512,
+        depth = 12,
+        heads = 8,
+        dim_head = 64,
+    )
+
+    tokens = torch.randint(0, 20000, (1, 2048))
+    logits = alibi(tokens) # (1, 2048, 20000)
+    print(logits.shape)
