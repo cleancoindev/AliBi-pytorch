@@ -47,7 +47,7 @@ class FeedForward(nn.Module):
 # AliBi Positional Bias
 
 class AlibiPositionalBias(nn.Module):
-    def __init__(self, heads, **kwargs):
+    def __init__(self, heads):
         super().__init__()
         self.heads = heads
         slopes = torch.Tensor(self._get_slopes(heads))
