@@ -107,7 +107,8 @@ class Attention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_q = nn.Linear(dim, inner_dim, bias = False)
+        self.to_kv = nn.Linear(dim, dim_head * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
         self.alibi_pos_biases = AlibiPositionalBias(heads = self.heads)
@@ -127,11 +128,11 @@ class Attention(nn.Module):
     def forward(self, x):
         n, h, device = x.shape[1], self.heads, x.device
 
-        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
+        q, k, v = (self.to_q(x), *self.to_kv(x).chunk(2, dim = -1))
 
+        q = rearrange(q, 'b n (h d) -> b h n d', h = h)
         q = q * self.scale
-        sim = einsum('b h i d, b h j d -> b h i j', q, k)
+        sim = einsum('b h i d, b j d -> b h i j', q, k)
 
         # ALiBi positional bias
         sim = sim + self.alibi_pos_biases(sim)
@@ -145,7 +146,7 @@ class Attention(nn.Module):
         attn = sim.softmax(dim = -1)
         attn = self.dropout(attn) # Optional dropout
 
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = einsum('b h i j, b j d -> b h i d', attn, v)
 
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
@@ -188,6 +189,7 @@ class ALiBi(nn.Module):
         return logits
 
 if __name__ == "__main__":
+
     alibi = ALiBi(
         num_tokens = 20000,
         dim = 512,
@@ -196,6 +198,12 @@ if __name__ == "__main__":
         dim_head = 64,
     )
 
-    tokens = torch.randint(0, 20000, (1, 1024))
+    tokens = torch.randint(0, 20000, (1, 2048))
     logits = alibi(tokens) # (1, 1024, 20000)
     print(logits.shape)
+
+    n_params_torch = sum(
+        p.numel() for p in alibi.parameters() if p.requires_grad
+    )
+
+    print(f"Number of parameters in torch model: {n_params_torch}")
