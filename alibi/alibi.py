@@ -114,32 +114,32 @@ class Attention(nn.Module):
 
         # for caching causal mask
 
-    #     self.register_buffer("mask", None, persistent=False) 
+        self.register_buffer("mask", None, persistent=False) 
 
-    # def get_mask(self, n, device):
-    #     if self.mask is not None and self.mask.shape[-1] >= n:
-    #         return self.mask[:n, :n]
+    def get_mask(self, n, device):
+        if self.mask is not None and self.mask.shape[-1] >= n:
+            return self.mask[:n, :n]
 
-    #     mask = torch.triu(torch.ones((n, n), device=device, dtype=torch.bool), 1)
-    #     self.register_buffer("mask", mask, persistent=False)
-    #     return mask
+        mask = torch.triu(torch.ones((n, n), device=device, dtype=torch.bool), 1)
+        self.register_buffer("mask", mask, persistent=False)
+        return mask
 
     def forward(self, x):
-        h, device = self.heads, x.device
+        n, h, device = x.shape[1], self.heads, x.device
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
         q = q * self.scale
         sim = einsum('b h i d, b h j d -> b h i j', q, k)
-        i, j = sim.shape[-2:]
 
         # ALiBi positional bias
         sim = sim + self.alibi_pos_biases(sim)
 
-        # Causal Mask
-        causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
-        sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
+        # causal mask
+        mask_value = -torch.finfo(sim.dtype).max
+        causal_mask = self.get_mask(n, device)
+        sim = sim.masked_fill(causal_mask, mask_value)
 
         # attention
         attn = sim.softmax(dim = -1)
@@ -196,6 +196,6 @@ if __name__ == "__main__":
         dim_head = 64,
     )
 
-    tokens = torch.randint(0, 20000, (1, 2048))
-    logits = alibi(tokens) # (1, 2048, 20000)
+    tokens = torch.randint(0, 20000, (1, 512))
+    logits = alibi(tokens) # (1, 512, 20000)
     print(logits.shape)
