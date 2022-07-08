@@ -196,6 +196,6 @@ if __name__ == "__main__":
         dim_head = 64,
     )
 
-    tokens = torch.randint(0, 20000, (1, 512))
-    logits = alibi(tokens) # (1, 512, 20000)
+    tokens = torch.randint(0, 20000, (1, 1024))
+    logits = alibi(tokens) # (1, 1024, 20000)
     print(logits.shape)
